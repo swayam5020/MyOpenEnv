@@ -1,0 +1,21 @@
+name: support-ops-env
+version: 1.0
+entrypoint: app.env:SupportOpsEnv
+
+tasks:
+  - easy
+  - medium
+  - hard
+
+action_space:
+  action_type: string
+  content: string
+
+observation_space:
+  email: object
+  conversation: list
+  status: string
+
+reward:
+  type: float
+  range: [0.0, 1.0]
