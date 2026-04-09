@@ -1,3 +1,5 @@
 pydantic
 openai
 pyyaml
+gradio
+huggingface_hub
