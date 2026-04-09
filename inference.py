@@ -1,19 +1,43 @@
 import os, json, re
+from typing import List, Optional
 from openai import OpenAI
+
 from app.env import SupportOpsEnv
 from app.models import Action
 
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-API_KEY = os.getenv("HF_TOKEN")
+# ================= CONFIG =================
+API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
+MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
+API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 
-client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+TASK_NAME = os.getenv("TASK_NAME", "easy")
+BENCHMARK = "SupportOpsEnv"
 
-env = SupportOpsEnv()
-tasks = ["easy", "medium", "hard"]
+MAX_STEPS = 1
+
+# ================= LOGGER =================
+def log_start(task: str, env: str, model: str):
+    print(f"[START] task={task} env={env} model={model}", flush=True)
 
 
-# 🔥 SAFE JSON PARSER (CRITICAL FIX)
+def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]):
+    error_val = error if error else "null"
+    done_val = str(done).lower()
+    print(
+        f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}",
+        flush=True,
+    )
+
+
+def log_end(success: bool, steps: int, score: float, rewards: List[float]):
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(
+        f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}",
+        flush=True,
+    )
+
+
+# ================= SAFE JSON =================
 def extract_json(text):
     try:
         return json.loads(text)
@@ -21,45 +45,29 @@ def extract_json(text):
         match = re.search(r'\{.*\}', text, re.DOTALL)
         if match:
             return json.loads(match.group(0))
-        else:
-            raise ValueError("No valid JSON found")
+        raise ValueError("Invalid JSON")
 
 
-for task_name in tasks:
-    print(f"[START] task={task_name}")
-
-    obs = env.reset(task_name)
-    rewards = []
-    done = False
-    step = 0
-
-    try:
-        while not done and step < 3:
-            step += 1
-
-            prompt = f"""
+# ================= MODEL =================
+def get_model_response(client: OpenAI, obs) -> dict:
+    prompt = f"""
 You are an AI support agent.
 
 STRICT RULES:
 - Output ONLY JSON
 - No explanations
 - No markdown
-- No email format
 
-FORMAT EXACTLY:
+FORMAT:
 {{
   "action_type": "reply",
   "content": "category: <value>, priority: <value>, route: <value>, resolution: <short text>"
 }}
 
-Use ONLY these values:
-- category: billing / technical
-- priority: low / medium / high
-- route: finance / tech / support
-
-If complex issue → include word "escalate"
-
----
+Allowed:
+category: billing / technical
+priority: low / medium / high
+route: finance / tech / support
 
 Email:
 {obs.email.body}
@@ -68,29 +76,67 @@ Conversation:
 {obs.conversation}
 """
 
-            res = client.chat.completions.create(
-                model=MODEL_NAME,
-                temperature=0.2,
-                messages=[{"role": "user", "content": prompt}]
-            )
+    completion = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+    )
 
-            raw_output = res.choices[0].message.content.strip()
-            print("MODEL OUTPUT:", raw_output)
+    raw = completion.choices[0].message.content.strip()
+    return extract_json(raw)
 
-            action_json = extract_json(raw_output)
+
+# ================= MAIN =================
+def main():
+    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+
+    env = SupportOpsEnv()
+
+    rewards = []
+    steps_taken = 0
+    success = False
+    score = 0.0
+
+    log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
+
+    try:
+        obs = env.reset(task_name=TASK_NAME)
+
+        for step in range(1, MAX_STEPS + 1):
+
+            action_json = get_model_response(client, obs)
+
             action = Action(**action_json)
 
-            obs, reward, done, _ = env.step(action)
+            obs, reward_obj, done, _ = env.step(action)
 
-            rewards.append(reward.score)
+            reward = reward_obj.score if reward_obj else 0.0
+            rewards.append(reward)
 
-            print(f"[STEP] step={step} reward={reward.score:.2f} done={done}")
+            steps_taken = step
 
-        score = sum(rewards) / len(rewards) if rewards else 0
-        success = score > 0.5
+            log_step(
+                step=step,
+                action=str(action_json),
+                reward=reward,
+                done=done,
+                error=None,
+            )
 
-        print(f"[END] success={success} steps={step} score={score:.2f}")
+            if done:
+                break
+
+        score = sum(rewards) / len(rewards) if rewards else 0.0
+        success = score >= 0.5
 
     except Exception as e:
-        print("ERROR:", str(e))
-        print(f"[END] success=false steps={step} score=0.00")
+        log_step(steps_taken, "error", 0.0, True, str(e))
+        success = False
+        score = 0.0
+
+    finally:
+        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+
+
+if __name__ == "__main__":
+    main()
