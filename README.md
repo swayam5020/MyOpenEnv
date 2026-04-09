@@ -1,3 +1,11 @@
+---
+title: My Open Env
+emoji: 🚀
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+---
 # SupportOps OpenEnv
 
 ## Description
