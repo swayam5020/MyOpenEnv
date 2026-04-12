@@ -1,0 +1,9 @@
+[project]
+name = "openenv-support-ops"
+version = "0.1.67"
+description = "OpenEnv Support Ops Agent"
+dependencies = [
+    "openai",
+]
+[tool.setuptools]
+packages = ["app"]
