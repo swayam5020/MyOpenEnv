@@ -1,6 +1,13 @@
+import os
+from openai import OpenAI
 from fastapi import FastAPI
 from app.env import SupportOpsEnv
 from app.models import Action
+
+client = OpenAI(
+    base_url=os.environ["API_BASE_URL"],
+    api_key=os.environ["API_KEY"]
+)
 
 app = FastAPI()
 env = SupportOpsEnv()
@@ -13,12 +20,15 @@ def home():
 def run_agent(user_input: str = "test", task_type: str = "easy"):
     obs = env.reset(task_type)
 
-    action_text = f"""
-category: billing
-priority: high
-route: finance
-resolution: {user_input}
-    """
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are a support agent. Respond in format: category, priority, route, resolution."},
+            {"role": "user", "content": user_input}
+        ]
+    )
+
+    action_text = response.choices[0].message.content
 
     action = Action(
         action_type="reply",
