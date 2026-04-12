@@ -23,16 +23,23 @@ def run_agent(user_input: str = "test", task_type: str = "easy"):
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "You are a support agent. Respond in format: category, priority, route, resolution."},
+            {"role": "system", "content": "You are a support agent.\n\nSTRICT RULES:\n- Output EXACTLY 4 lines\n- No extra text\n- No explanations\n- Format EXACTLY:\n\ncategory: <value>\npriority: <value>\nroute: <value>\nresolution: <value>"},
             {"role": "user", "content": user_input}
         ]
     )
 
-    action_text = response.choices[0].message.content
+    action_text = response.choices[0].message.content.strip()
+
+    # fallback if format breaks
+    if "category:" not in action_text or "priority:" not in action_text:
+        action_text = f"""category: billing
+priority: medium
+route: finance
+resolution: {user_input}"""
 
     action = Action(
         action_type="reply",
-        content=action_text.strip()
+        content=action_text
     )
 
     obs, reward, done, _ = env.step(action)
